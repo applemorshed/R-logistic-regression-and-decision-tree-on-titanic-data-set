@@ -1,0 +1,306 @@
+---
+title: "Assignment 3 Titanic Dataset"
+author: "Hossain Morshed"
+date: "3/16/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+rm(list=ls(all=TRUE))
+```
+
+
+```{r}
+if(!require("tidyr")){
+  install.packages("tidyr")
+}
+library(tidyr)
+
+if(!require("caret")){
+  install.packages("caret")
+}
+
+library(caret)
+
+if(!require("car")){
+  install.packages("car")
+}
+library(car)
+library(dplyr)
+
+library(tidyverse)
+library(ggplot2)
+
+library(rpart)
+library(rpart.plot)
+if(!require("randomForest")){
+  install.packages("randomForest")
+}
+library(randomForest)
+require(caTools)
+library(RColorBrewer)
+library(rattle)
+
+
+
+```
+
+
+I download the Titanic data from Kaggle named train.Kaggle  data set contain also test data set, for this assignment purpose we use only train data set.
+https://www.kaggle.com/c/titanic/data
+Data Dictionary:
+survival  ->	Survival where	0 = No, 1 = Yes
+pclass    ->	Ticket class where	1 = 1st, 2 = 2nd, 3 = 3rd
+sex     	->  Sex	
+Age	      ->  Age in years	
+sibsp	    ->  # of siblings / spouses aboard the Titanic	
+parch     ->	# of parents / children aboard the Titanic	
+ticket    ->	Ticket number	
+fare      ->	Passenger fare	
+cabin     ->	Cabin number	
+embarked  ->	Port of Embarkation	C = Cherbourg, Q = Queenstown, S = Southampton
+
+
+
+```{r}
+train <- read.csv("train.csv")
+#head(train)
+summary(train)
+
+```
+
+Now we going check how many missing value we have in our data set.
+```{r}
+colSums(is.na(train))
+colSums(train=="")
+glimpse(train)
+
+```
+We can see there is 177 missing Value in Age Variable. 687 missing value in Cabin variable and 2 in Embarked. Because of too many missing value in Cabin variable we are going to drop this variable.
+
+We have 177 missing value in age column, which is a hugh amount of number. We are going to fillup missing value by randomly selected number for this analysis, I Want to see how our machine learning algorithem works to fill up missing observation in this way instead of deleting all the missing row.
+histogram of age shows it is normally distributed so we replace the value with random number draw from a normal distribution
+
+```{r}
+hist(train$Age)
+mean_age<-mean(train$Age,na.rm = TRUE)
+std_train<-sd(train$Age,na.rm = TRUE)
+
+set.seed(1)
+r_miss_age<-data.frame("Age"=c(abs(floor(rnorm(177, mean_age, std_train)))))
+#r_miss_age
+
+train_df<- train%>%mutate(Age= replace(Age,is.na(Age),(abs(floor(rnorm(177, mean_age, std_train))))))
+hist(train_df$Age)
+```
+Before and After Histogram follow the same pattern. 
+Now we have two misssing value in Embarked column, in Embarked column  "S"  occour frequently so we replace those two missing value with "S"  
+
+```{r}
+summary(train_df$Embarked)
+print("Missing Value Location for Embarked variable is ")
+which(train_df$Embarked == '')
+```
+
+```{r}
+train_df$Embarked[c(62,830)] = "S"
+train_df$Embarked <- factor(train_df$Embarked)
+```
+
+We are creating a new column Fare catagori, where we group fare column based on their fair.
+Below $8 Group 1
+From $8 to $15 Group 2
+From $16 to $30 Group 3
+From $31 to $100 Group 4
+From $101 to $250 Group 5
+From $250+ Group 6
+
+```{r}
+train_df$Fare_cat<- 1
+train_df$Fare_cat[train_df$Fare > 8 & train_df$Fare <= 15] <- 2
+train_df$Fare_cat[train_df$Fare > 15 & train_df$Fare <= 30] <- 3
+train_df$Fare_cat[train_df$Fare > 30 & train_df$Fare <= 100] <- 4
+train_df$Fare_cat[train_df$Fare > 100 & train_df$Fare <= 250] <- 5
+train_df$Fare_cat[train_df$Fare > 250 ] <- 6
+train_df$Fare_cat<- as.factor(train_df$Fare_cat)
+
+```
+
+Same way, We are creating a new column Age catagori, where we group Age column based on their Age.
+From age <=18 Group 1
+From age >18 and Age <= 30 Group 2
+From age >30 and Age <= 50 Group 3
+From age >50 and Age <= 65 Group 4
+From age 65+ Group 5
+
+```{r}
+train_df$age_cat<- 0
+train_df$age_cat[train_df$Age <= 18] <- 1
+train_df$age_cat[train_df$Age > 18 & train_df$Age <= 30] <- 2
+train_df$age_cat[train_df$Age > 30 & train_df$Age <= 50] <- 3
+train_df$age_cat[train_df$Age > 50 & train_df$Age <= 65] <- 4
+train_df$age_cat[train_df$Age > 65 ] <- 5
+train_df$age_cat<- as.factor(train_df$age_cat)
+```
+
+I was thinking to drop the "Name"  Column but i find a site "https://www.kaggle.com/hillabehar/titanic-analysis-with-r" where he catagorize the title column based on pessenger "Title".
+
+```{r}
+train_df$Title <- gsub('(.*, )|(\\..*)', '', train_df$Name)
+table(train_df$Title)
+```
+
+we convert all "MLLe","Ms", "Lady" to -> Miss. Title "Mme" to-> "Mrs" and all the title which are 'Capt','Col','Don','Dr','Jonkheer','Major','Rev','Sir','the Countess' converted to-> "Officer".
+
+
+```{r}
+train_df$Title[train_df$Title == 'Mlle']<- 'Miss' 
+train_df$Title[train_df$Title == 'Ms']<- 'Miss'
+train_df$Title[train_df$Title == 'Mme']<- 'Mrs' 
+train_df$Title[train_df$Title == 'Lady']<- 'Miss' 
+
+officer<- c('Capt','Col','Don','Dr','Jonkheer','Major','Rev','Sir','the Countess')
+train_df$Title[train_df$Title %in% officer]<- 'Officer' 
+train_df$Title<- as.factor(train_df$Title)
+ 
+```
+
+Now we convert some of our data for analysis.
+
+```{r}
+train_df$Sex = as.integer(train_df$Sex)
+train_df$Title = as.integer(train_df$Title)
+train_df$Pclass = as.factor(train_df$Pclass)
+train_df$Embarked = as.integer(train_df$Embarked)
+train_df$Embarked = as.factor(train_df$Embarked)
+
+table(train_df$Sex)
+table(train_df$Title)
+table(train_df$Embarked)
+
+```
+In sex column, 1= Female, 2= Male
+In Title column, Master=1,Miss=2 Mr=3, Mrs=4,Officer=5
+In Embarked column  C=1,Q=2,S=3 
+
+
+Now we Create our final data set for analysis.
+
+```{r}
+glimpse(train_df)
+titanic_dataset<-train_df%>% select(Survived,Pclass,Title,Sex,age_cat,SibSp,Parch,Fare_cat,Embarked)
+glimpse(titanic_dataset)
+#table(titanic_dataset$SibSp)
+```
+
+
+Now we are spliting our dataset into train and test set. we keep 80 % data for training and 20% data for test.
+```{r}
+set.seed(1)
+
+# Shuffle the dataset, call the result shuffled
+n <- nrow(titanic_dataset)
+shuffled <- titanic_dataset[sample(n),]
+
+# Split the data in train and test
+train_indices <- 1:round(0.8 * n)
+titanic_train <- shuffled[train_indices, ]
+test_indices <- (round(0.8 * n) + 1):n
+titanic_test <- shuffled[test_indices, ]
+# Print the structure of train and test
+str(titanic_train)
+str(titanic_test)
+```
+
+Fitting logistic linear model to Titanic training Data set.
+
+```{r}
+# Logistic Regression.
+fit_glm <- glm(Survived~.,titanic_train,family=binomial(link="logit"))
+summary(fit_glm)
+vif(fit_glm)
+```
+all variables in the model have Vif value is less then 5, which means their is no multicollinearity in the model.
+
+
+```{r}
+prediction_lm<-predict(fit_glm,titanic_test)
+#prediction_lm
+
+prediction_lm<-ifelse(prediction_lm>.5,1,0)
+# Mean of the true prediction 
+acc_logit<-mean(prediction_lm==titanic_test$Survived)
+acc_logit
+```
+
+Now using Decision Tree Model we get...
+```{r}
+### Decision Tree
+titanic_class_model<-rpart(formula = Survived~., 
+                      data = titanic_train, 
+                      method = "class")
+#print(titanic_class_model)
+pred=predict(titanic_class_model,titanic_test,type="class")
+#pred
+
+acc_class<-mean(pred==titanic_test$Survived)
+
+rpart.plot(titanic_class_model)
+print(acc_class)
+
+```
+0.8370787
+
+Now Using Random Forest Model We get
+```{r}
+rf <- randomForest(as.factor(Survived) ~ .,data=titanic_train,ntree=1000)#mtry=3
+rf
+predrf<- predict(rf,titanic_test)
+
+acc_rf<-mean(predrf==titanic_test$Survived)
+print("Random Forest Model Accurecy is :")
+print(acc_rf)
+#glimpse(titanic_train)
+```
+
+
+
+
+```{r}
+Model_Comparison<-data.frame("Model"=c("Logistic_linear_Regression",
+                                       "Decision_Tree","Ranodm_Forest"),
+                              "Accuracy"=c(acc_logit,acc_class,acc_rf))
+Model_Comparison%>%arrange(desc(Accuracy))
+
+```
+So we can see that Random Forest Model has the higest accurecy with accuracy rate 0.8595506 then Decision Tree with accuracy rate 0.8370787 and followed by Logistic_linear_Regression with accuracy rate 0.8202247.
+
+
+
+```{r}
+
+```
+
+
+
+
+```{r}
+
+```
+
+
+
+```{r}
+
+```
+
+
+
+```{r}
+
+```
