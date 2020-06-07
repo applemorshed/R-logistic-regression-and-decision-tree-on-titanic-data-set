@@ -282,25 +282,6 @@ So we can see that Random Forest Model has the higest accurecy with accuracy rat
 
 
 
-```{r}
-
-```
 
 
 
-
-```{r}
-
-```
-
-
-
-```{r}
-
-```
-
-
-
-```{r}
-
-```
